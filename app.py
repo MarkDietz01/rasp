@@ -580,7 +580,12 @@ def build_page() -> str:
                         const printableW = tileW * columns;
                         const printableH = tileH * rows;
 
-                        const scaleToPrintable = Math.min(1, printableW / imgWidthMm, printableH / imgHeightMm);
+                        // Scale up just enough to cover the printable area so the preview stays fully filled.
+                        const scaleToPrintable = Math.max(
+                            1,
+                            printableW / imgWidthMm,
+                            printableH / imgHeightMm,
+                        );
                         const drawWmm = imgWidthMm * scaleToPrintable;
                         const drawHmm = imgHeightMm * scaleToPrintable;
 
@@ -807,18 +812,19 @@ def rasterbate_image(
 
     image = Image.open(BytesIO(image_bytes)).convert("RGB")
 
-    # Preserve the original resolution: no downscaling. We only crop to the
-    # available poster area or center the image if it is smaller than the grid.
-    crop_w = min(image.width, target_w)
-    crop_h = min(image.height, target_h)
-    left = max(0, (image.width - crop_w) // 2)
-    top = max(0, (image.height - crop_h) // 2)
-    cover = image.crop((left, top, left + crop_w, top + crop_h))
+    # Preserve quality while ensuring the poster area is fully filled. We scale
+    # up only as much as necessary to cover the grid, then center-crop.
+    scale = max(1.0, target_w / image.width, target_h / image.height)
+    if scale > 1.0:
+        new_size = (int(round(image.width * scale)), int(round(image.height * scale)))
+        image = image.resize(new_size, Image.LANCZOS)
+
+    left = max(0, (image.width - target_w) // 2)
+    top = max(0, (image.height - target_h) // 2)
+    cover = image.crop((left, top, left + target_w, top + target_h))
 
     mosaic = Image.new("RGB", (target_w, target_h), "white")
-    offset_x = (target_w - crop_w) // 2
-    offset_y = (target_h - crop_h) // 2
-    mosaic.paste(cover, (offset_x, offset_y))
+    mosaic.paste(cover, (0, 0))
 
     pages = []
     for row in range(rows):
