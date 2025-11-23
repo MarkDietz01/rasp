@@ -4,9 +4,7 @@ from textwrap import dedent
 from email import policy
 from email.parser import BytesParser
 
-from PIL import Image
-
-HOST = "0.0.0.0"
+HOST = "localhost"
 PORT = 8000
 
 
@@ -207,6 +205,9 @@ def build_page() -> str:
                     position: relative;
                     width: 100%;
                     aspect-ratio: 3 / 2;
+                    min-height: 260px;
+                    display: grid;
+                    place-items: stretch;
                     background: radial-gradient(circle at 40% 30%, rgba(255,44,85,0.12), transparent 45%),
                                 radial-gradient(circle at 70% 70%, rgba(85,100,255,0.1), transparent 40%),
                                 #0e0e13;
@@ -218,6 +219,8 @@ def build_page() -> str:
                     width: 100%;
                     height: 100%;
                     display: block;
+                    position: absolute;
+                    inset: 0;
                 }
                 .preview-placeholder {
                     position: absolute;
@@ -227,6 +230,8 @@ def build_page() -> str:
                     color: var(--muted);
                     font-size: 15px;
                     letter-spacing: 0.3px;
+                    background: linear-gradient(145deg, rgba(31,31,36,0.4), rgba(27,27,31,0.3));
+                    z-index: 1;
                 }
                 .preview-meta {
                     display: flex;
@@ -553,10 +558,15 @@ def build_page() -> str:
                         if (tileW <= 0 || tileH <= 0 || !loadedImage) {
                             const ctx = previewCanvas.getContext("2d");
                             const boxRect = previewBox.getBoundingClientRect();
+                            if (!boxRect.width || !boxRect.height) {
+                                requestAnimationFrame(renderPreview);
+                                return;
+                            }
                             previewCanvas.width = boxRect.width;
                             previewCanvas.height = boxRect.height;
                             ctx.clearRect(0, 0, previewCanvas.width, previewCanvas.height);
                             placeholder.style.display = "grid";
+                            placeholder.textContent = "Upload an image to preview the cuts";
                             return;
                         }
 
@@ -573,6 +583,10 @@ def build_page() -> str:
                         previewBox.style.aspectRatio = `${totalW} / ${totalH}`;
 
                         const boxRect = previewBox.getBoundingClientRect();
+                        if (!boxRect.width || !boxRect.height) {
+                            requestAnimationFrame(renderPreview);
+                            return;
+                        }
                         const dpr = window.devicePixelRatio || 1;
                         previewCanvas.width = boxRect.width * dpr;
                         previewCanvas.height = boxRect.height * dpr;
@@ -677,12 +691,16 @@ def build_page() -> str:
                             return;
                         }
 
+                        placeholder.style.display = "grid";
+                        placeholder.textContent = "Loading preview...";
+
                         const reader = new FileReader();
                         reader.onload = () => {
                             const img = new Image();
                             img.onload = () => {
                                 loadedImage = img;
                                 renderPreview();
+                                placeholder.textContent = "";
                             };
                             img.src = reader.result;
                         };
@@ -693,6 +711,8 @@ def build_page() -> str:
                         input.addEventListener("input", renderPreview);
                         input.addEventListener("change", renderPreview);
                     });
+
+                    window.addEventListener("resize", () => requestAnimationFrame(renderPreview));
 
                     renderPreview();
                 })();
@@ -722,6 +742,13 @@ def rasterbate_image(
     margin_mm: float,
     dpi: int,
 ) -> BytesIO:
+    try:
+        from PIL import Image  # type: ignore
+    except ModuleNotFoundError as exc:  # pragma: no cover - runtime dependency guard
+        raise ImportError(
+            "Pillow is required to rasterbate images. Please install it with `pip install pillow`."
+        ) from exc
+
     if columns < 1 or rows < 1:
         raise ValueError("Columns and rows must be positive integers.")
     if margin_mm < 0:
