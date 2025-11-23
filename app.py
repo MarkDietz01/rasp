@@ -505,6 +505,7 @@ def build_page() -> str:
                     const columnsInput = form.querySelector('input[name="columns"]');
                     const rowsInput = form.querySelector('input[name="rows"]');
                     const marginInput = form.querySelector('input[name="margin"]');
+                    const dpiInput = form.querySelector('input[name="dpi"]');
                     const pageSizeSelect = form.querySelector('select[name="page_size"]');
                     const orientationSelect = form.querySelector('select[name="orientation"]');
                     const previewCanvas = document.getElementById("preview-canvas");
@@ -526,19 +527,19 @@ def build_page() -> str:
                         return Math.max(min, num);
                     }
 
-                    function updateLabels(columns, rows, pageSize, orientation, margin) {
+                    function updateLabels(columns, rows, pageSize, orientation, margin, dpi, footprintCols, footprintRows) {
                         gridLabel.textContent = `Grid: ${columns} × ${rows}`;
-                        pageLabel.textContent = `${pageSize} ${orientation} • ${margin} mm margin`;
+                        const footprint = `${footprintCols.toFixed(1)} × ${footprintRows.toFixed(1)} pages at ${dpi} DPI`;
+                        pageLabel.textContent = `${pageSize} ${orientation} • ${margin} mm margin • ${footprint}`;
                     }
 
                     function renderPreview() {
                         const columns = clampNumber(columnsInput.value, 3);
                         const rows = clampNumber(rowsInput.value, 3);
                         const margin = Math.max(0, Number.parseFloat(marginInput.value) || 0);
+                        const dpi = clampNumber(dpiInput.value, 300, 72);
                         const pageSize = pageSizeSelect.value in PAGE_SIZES ? pageSizeSelect.value : "A4";
                         const orientation = orientationSelect.value === "landscape" ? "landscape" : "portrait";
-
-                        updateLabels(columns, rows, pageSize, orientation, margin);
 
                         const size = PAGE_SIZES[pageSize];
                         let [pageW, pageH] = size;
@@ -558,6 +559,14 @@ def build_page() -> str:
                             placeholder.style.display = "grid";
                             return;
                         }
+
+                        const targetWpx = tileW * columns * (dpi / 25.4);
+                        const targetHpx = tileH * rows * (dpi / 25.4);
+                        const cropWpx = Math.min(loadedImage.width, targetWpx);
+                        const cropHpx = Math.min(loadedImage.height, targetHpx);
+                        const footprintCols = cropWpx / (tileW * (dpi / 25.4));
+                        const footprintRows = cropHpx / (tileH * (dpi / 25.4));
+                        updateLabels(columns, rows, pageSize, orientation, margin, dpi, footprintCols, footprintRows);
 
                         const totalW = pageW * columns;
                         const totalH = pageH * rows;
@@ -583,9 +592,10 @@ def build_page() -> str:
                         ctx.fillStyle = "#0f0f15";
                         ctx.fillRect(offsetX - 12, offsetY - 12, mosaicW + 24, mosaicH + 24);
 
-                        const scaleToCover = Math.max((tileW * columns) / loadedImage.width, (tileH * rows) / loadedImage.height);
-                        const srcLeft = Math.max(0, (loadedImage.width * scaleToCover - tileW * columns) / 2);
-                        const srcTop = Math.max(0, (loadedImage.height * scaleToCover - tileH * rows) / 2);
+                        const cropLeftPx = Math.max(0, (loadedImage.width - cropWpx) / 2);
+                        const cropTopPx = Math.max(0, (loadedImage.height - cropHpx) / 2);
+                        const artOffsetWmm = ((tileW * columns) - (cropWpx / (dpi / 25.4))) / 2;
+                        const artOffsetHmm = ((tileH * rows) - (cropHpx / (dpi / 25.4))) / 2;
 
                         for (let row = 0; row < rows; row += 1) {
                             for (let col = 0; col < columns; col += 1) {
@@ -599,22 +609,39 @@ def build_page() -> str:
                                 ctx.fillStyle = "#181822";
                                 ctx.fillRect(pageX, pageY, pageW * scaleToBox, pageH * scaleToBox);
 
-                                const srcX = (srcLeft + col * tileW) / scaleToCover;
-                                const srcY = (srcTop + row * tileH) / scaleToCover;
-                                const srcW = tileW / scaleToCover;
-                                const srcH = tileH / scaleToCover;
+                                const imageStartXmm = artOffsetWmm + col * tileW + margin - margin;
+                                const imageStartYmm = artOffsetHmm + row * tileH + margin - margin;
+                                const imageEndXmm = imageStartXmm + (cropWpx / (dpi / 25.4));
+                                const imageEndYmm = imageStartYmm + (cropHpx / (dpi / 25.4));
 
-                                ctx.drawImage(
-                                    loadedImage,
-                                    srcX,
-                                    srcY,
-                                    srcW,
-                                    srcH,
-                                    tileX,
-                                    tileY,
-                                    tileDisplayW,
-                                    tileDisplayH,
-                                );
+                                const tileStartXmm = col * pageW + margin;
+                                const tileStartYmm = row * pageH + margin;
+                                const tileEndXmm = tileStartXmm + tileW;
+                                const tileEndYmm = tileStartYmm + tileH;
+
+                                const drawStartXmm = Math.max(tileStartXmm, imageStartXmm);
+                                const drawStartYmm = Math.max(tileStartYmm, imageStartYmm);
+                                const drawEndXmm = Math.min(tileEndXmm, imageEndXmm);
+                                const drawEndYmm = Math.min(tileEndYmm, imageEndYmm);
+
+                                if (drawEndXmm > drawStartXmm && drawEndYmm > drawStartYmm) {
+                                    const srcX = cropLeftPx + ((drawStartXmm - imageStartXmm) / (cropWpx / (dpi / 25.4))) * cropWpx;
+                                    const srcY = cropTopPx + ((drawStartYmm - imageStartYmm) / (cropHpx / (dpi / 25.4))) * cropHpx;
+                                    const srcW = ((drawEndXmm - drawStartXmm) / (cropWpx / (dpi / 25.4))) * cropWpx;
+                                    const srcH = ((drawEndYmm - drawStartYmm) / (cropHpx / (dpi / 25.4))) * cropHpx;
+
+                                    ctx.drawImage(
+                                        loadedImage,
+                                        srcX,
+                                        srcY,
+                                        srcW,
+                                        srcH,
+                                        offsetX + (drawStartXmm) * scaleToBox,
+                                        offsetY + (drawStartYmm) * scaleToBox,
+                                        (drawEndXmm - drawStartXmm) * scaleToBox,
+                                        (drawEndYmm - drawStartYmm) * scaleToBox,
+                                    );
+                                }
 
                                 ctx.strokeStyle = "rgba(255,255,255,0.22)";
                                 ctx.lineWidth = 1.5;
@@ -662,7 +689,7 @@ def build_page() -> str:
                         reader.readAsDataURL(file);
                     });
 
-                    [columnsInput, rowsInput, marginInput, pageSizeSelect, orientationSelect].forEach((input) => {
+                    [columnsInput, rowsInput, marginInput, dpiInput, pageSizeSelect, orientationSelect].forEach((input) => {
                         input.addEventListener("input", renderPreview);
                         input.addEventListener("change", renderPreview);
                     });
@@ -728,14 +755,18 @@ def rasterbate_image(
 
     image = Image.open(BytesIO(image_bytes)).convert("RGB")
 
-    # Scale the image to cover the target area, then center-crop
-    scale = max(target_w / image.width, target_h / image.height)
-    new_size = (int(image.width * scale), int(image.height * scale))
-    resized = image.resize(new_size, Image.LANCZOS)
+    # Preserve the original resolution: no downscaling. We only crop to the
+    # available poster area or center the image if it is smaller than the grid.
+    crop_w = min(image.width, target_w)
+    crop_h = min(image.height, target_h)
+    left = max(0, (image.width - crop_w) // 2)
+    top = max(0, (image.height - crop_h) // 2)
+    cover = image.crop((left, top, left + crop_w, top + crop_h))
 
-    left = max(0, (resized.width - target_w) // 2)
-    top = max(0, (resized.height - target_h) // 2)
-    cover = resized.crop((left, top, left + target_w, top + target_h))
+    mosaic = Image.new("RGB", (target_w, target_h), "white")
+    offset_x = (target_w - crop_w) // 2
+    offset_y = (target_h - crop_h) // 2
+    mosaic.paste(cover, (offset_x, offset_y))
 
     pages = []
     for row in range(rows):
@@ -746,7 +777,7 @@ def rasterbate_image(
                 (col + 1) * tile_w,
                 (row + 1) * tile_h,
             )
-            tile = cover.crop(crop_box)
+            tile = mosaic.crop(crop_box)
             page = Image.new("RGB", (page_w_px, page_h_px), "white")
             page.paste(tile, (margin_px, margin_px))
             pages.append(page)
