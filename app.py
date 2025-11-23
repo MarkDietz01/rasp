@@ -574,15 +574,24 @@ def build_page() -> str:
                         }
 
                         const pxPerMm = dpi / 25.4;
-                        const imgWidthMm = loadedImage.width / pxPerMm;
-                        const imgHeightMm = loadedImage.height / pxPerMm;
+                        const pageWPx = pageW * pxPerMm;
+                        const pageHPx = pageH * pxPerMm;
+                        const marginPx = margin * pxPerMm;
+                        const tileWPx = pageWPx - 2 * marginPx;
+                        const tileHPx = pageHPx - 2 * marginPx;
 
-                        const printableW = tileW * columns;
-                        const printableH = tileH * rows;
+                        const targetWPx = tileWPx * columns;
+                        const targetHPx = tileHPx * rows;
 
-                        const scaleToPrintable = Math.min(1, printableW / imgWidthMm, printableH / imgHeightMm);
-                        const drawWmm = imgWidthMm * scaleToPrintable;
-                        const drawHmm = imgHeightMm * scaleToPrintable;
+                        // Match the PDF pipeline: scale just enough to cover the grid in pixel space, then center.
+                        const scaleToCoverPx = Math.max(
+                            1,
+                            targetWPx / loadedImage.width,
+                            targetHPx / loadedImage.height,
+                        );
+
+                        const drawWmm = (loadedImage.width * scaleToCoverPx) / pxPerMm;
+                        const drawHmm = (loadedImage.height * scaleToCoverPx) / pxPerMm;
 
                         const footprintCols = drawWmm / tileW;
                         const footprintRows = drawHmm / tileH;
@@ -625,10 +634,8 @@ def build_page() -> str:
                         ctx.fillStyle = "#0f0f15";
                         ctx.fillRect(offsetX - 12, offsetY - 12, mosaicW + 24, mosaicH + 24);
 
-                        const printSpanW = totalW - 2 * margin;
-                        const printSpanH = totalH - 2 * margin;
-                        const startXmm = margin + (printSpanW - drawWmm) / 2;
-                        const startYmm = margin + (printSpanH - drawHmm) / 2;
+                        const startXmm = (totalW - drawWmm) / 2;
+                        const startYmm = (totalH - drawHmm) / 2;
 
                         for (let row = 0; row < rows; row += 1) {
                             for (let col = 0; col < columns; col += 1) {
@@ -649,10 +656,10 @@ def build_page() -> str:
                                 const drawEndYmm = Math.min(tileEndYmm, startYmm + drawHmm);
 
                                 if (drawEndXmm > drawStartXmm && drawEndYmm > drawStartYmm) {
-                                    const srcX = ((drawStartXmm - startXmm) / drawWmm) * (loadedImage.width / scaleToPrintable);
-                                    const srcY = ((drawStartYmm - startYmm) / drawHmm) * (loadedImage.height / scaleToPrintable);
-                                    const srcW = ((drawEndXmm - drawStartXmm) / drawWmm) * (loadedImage.width / scaleToPrintable);
-                                    const srcH = ((drawEndYmm - drawStartYmm) / drawHmm) * (loadedImage.height / scaleToPrintable);
+                                    const srcX = ((drawStartXmm - startXmm) / drawWmm) * (loadedImage.width / scaleToCoverPx);
+                                    const srcY = ((drawStartYmm - startYmm) / drawHmm) * (loadedImage.height / scaleToCoverPx);
+                                    const srcW = ((drawEndXmm - drawStartXmm) / drawWmm) * (loadedImage.width / scaleToCoverPx);
+                                    const srcH = ((drawEndYmm - drawStartYmm) / drawHmm) * (loadedImage.height / scaleToCoverPx);
 
                                     ctx.drawImage(
                                         loadedImage,
@@ -807,18 +814,19 @@ def rasterbate_image(
 
     image = Image.open(BytesIO(image_bytes)).convert("RGB")
 
-    # Preserve the original resolution: no downscaling. We only crop to the
-    # available poster area or center the image if it is smaller than the grid.
-    crop_w = min(image.width, target_w)
-    crop_h = min(image.height, target_h)
-    left = max(0, (image.width - crop_w) // 2)
-    top = max(0, (image.height - crop_h) // 2)
-    cover = image.crop((left, top, left + crop_w, top + crop_h))
+    # Preserve quality while ensuring the poster area is fully filled. We scale
+    # up only as much as necessary to cover the grid, then center-crop.
+    scale = max(1.0, target_w / image.width, target_h / image.height)
+    if scale > 1.0:
+        new_size = (int(round(image.width * scale)), int(round(image.height * scale)))
+        image = image.resize(new_size, Image.LANCZOS)
+
+    left = max(0, (image.width - target_w) // 2)
+    top = max(0, (image.height - target_h) // 2)
+    cover = image.crop((left, top, left + target_w, top + target_h))
 
     mosaic = Image.new("RGB", (target_w, target_h), "white")
-    offset_x = (target_w - crop_w) // 2
-    offset_y = (target_h - crop_h) // 2
-    mosaic.paste(cover, (offset_x, offset_y))
+    mosaic.paste(cover, (0, 0))
 
     pages = []
     for row in range(rows):
