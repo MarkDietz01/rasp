@@ -573,12 +573,19 @@ def build_page() -> str:
                             return;
                         }
 
-                        const targetWpx = tileW * columns * (dpi / 25.4);
-                        const targetHpx = tileH * rows * (dpi / 25.4);
-                        const cropWpx = Math.min(loadedImage.width, targetWpx);
-                        const cropHpx = Math.min(loadedImage.height, targetHpx);
-                        const footprintCols = cropWpx / (tileW * (dpi / 25.4));
-                        const footprintRows = cropHpx / (tileH * (dpi / 25.4));
+                        const pxPerMm = dpi / 25.4;
+                        const imgWidthMm = loadedImage.width / pxPerMm;
+                        const imgHeightMm = loadedImage.height / pxPerMm;
+
+                        const printableW = tileW * columns;
+                        const printableH = tileH * rows;
+
+                        const scaleToPrintable = Math.min(1, printableW / imgWidthMm, printableH / imgHeightMm);
+                        const drawWmm = imgWidthMm * scaleToPrintable;
+                        const drawHmm = imgHeightMm * scaleToPrintable;
+
+                        const footprintCols = drawWmm / tileW;
+                        const footprintRows = drawHmm / tileH;
                         updateLabels(columns, rows, pageSize, orientation, margin, dpi, footprintCols, footprintRows);
 
                         const totalW = pageW * columns;
@@ -618,43 +625,34 @@ def build_page() -> str:
                         ctx.fillStyle = "#0f0f15";
                         ctx.fillRect(offsetX - 12, offsetY - 12, mosaicW + 24, mosaicH + 24);
 
-                        const cropLeftPx = Math.max(0, (loadedImage.width - cropWpx) / 2);
-                        const cropTopPx = Math.max(0, (loadedImage.height - cropHpx) / 2);
-                        const artOffsetWmm = ((tileW * columns) - (cropWpx / (dpi / 25.4))) / 2;
-                        const artOffsetHmm = ((tileH * rows) - (cropHpx / (dpi / 25.4))) / 2;
+                        const printSpanW = totalW - 2 * margin;
+                        const printSpanH = totalH - 2 * margin;
+                        const startXmm = margin + (printSpanW - drawWmm) / 2;
+                        const startYmm = margin + (printSpanH - drawHmm) / 2;
 
                         for (let row = 0; row < rows; row += 1) {
                             for (let col = 0; col < columns; col += 1) {
                                 const pageX = offsetX + col * pageW * scaleToBox;
                                 const pageY = offsetY + row * pageH * scaleToBox;
-                                const tileX = pageX + margin * scaleToBox;
-                                const tileY = pageY + margin * scaleToBox;
-                                const tileDisplayW = tileW * scaleToBox;
-                                const tileDisplayH = tileH * scaleToBox;
 
                                 ctx.fillStyle = "#181822";
                                 ctx.fillRect(pageX, pageY, pageW * scaleToBox, pageH * scaleToBox);
-
-                                const imageStartXmm = artOffsetWmm + col * tileW + margin - margin;
-                                const imageStartYmm = artOffsetHmm + row * tileH + margin - margin;
-                                const imageEndXmm = imageStartXmm + (cropWpx / (dpi / 25.4));
-                                const imageEndYmm = imageStartYmm + (cropHpx / (dpi / 25.4));
 
                                 const tileStartXmm = col * pageW + margin;
                                 const tileStartYmm = row * pageH + margin;
                                 const tileEndXmm = tileStartXmm + tileW;
                                 const tileEndYmm = tileStartYmm + tileH;
 
-                                const drawStartXmm = Math.max(tileStartXmm, imageStartXmm);
-                                const drawStartYmm = Math.max(tileStartYmm, imageStartYmm);
-                                const drawEndXmm = Math.min(tileEndXmm, imageEndXmm);
-                                const drawEndYmm = Math.min(tileEndYmm, imageEndYmm);
+                                const drawStartXmm = Math.max(tileStartXmm, startXmm);
+                                const drawStartYmm = Math.max(tileStartYmm, startYmm);
+                                const drawEndXmm = Math.min(tileEndXmm, startXmm + drawWmm);
+                                const drawEndYmm = Math.min(tileEndYmm, startYmm + drawHmm);
 
                                 if (drawEndXmm > drawStartXmm && drawEndYmm > drawStartYmm) {
-                                    const srcX = cropLeftPx + ((drawStartXmm - imageStartXmm) / (cropWpx / (dpi / 25.4))) * cropWpx;
-                                    const srcY = cropTopPx + ((drawStartYmm - imageStartYmm) / (cropHpx / (dpi / 25.4))) * cropHpx;
-                                    const srcW = ((drawEndXmm - drawStartXmm) / (cropWpx / (dpi / 25.4))) * cropWpx;
-                                    const srcH = ((drawEndYmm - drawStartYmm) / (cropHpx / (dpi / 25.4))) * cropHpx;
+                                    const srcX = ((drawStartXmm - startXmm) / drawWmm) * (loadedImage.width / scaleToPrintable);
+                                    const srcY = ((drawStartYmm - startYmm) / drawHmm) * (loadedImage.height / scaleToPrintable);
+                                    const srcW = ((drawEndXmm - drawStartXmm) / drawWmm) * (loadedImage.width / scaleToPrintable);
+                                    const srcH = ((drawEndYmm - drawStartYmm) / drawHmm) * (loadedImage.height / scaleToPrintable);
 
                                     ctx.drawImage(
                                         loadedImage,
@@ -662,8 +660,8 @@ def build_page() -> str:
                                         srcY,
                                         srcW,
                                         srcH,
-                                        offsetX + (drawStartXmm) * scaleToBox,
-                                        offsetY + (drawStartYmm) * scaleToBox,
+                                        offsetX + drawStartXmm * scaleToBox,
+                                        offsetY + drawStartYmm * scaleToBox,
                                         (drawEndXmm - drawStartXmm) * scaleToBox,
                                         (drawEndYmm - drawStartYmm) * scaleToBox,
                                     );
