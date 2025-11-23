@@ -199,6 +199,51 @@ def build_page() -> str:
                     margin: 0 auto 60px;
                     padding: 0 20px;
                 }
+                .live-preview {
+                    background: linear-gradient(145deg, rgba(31,31,36,0.7), rgba(27,27,31,0.6));
+                    border: 1px dashed #2c2c35;
+                }
+                .preview-box {
+                    position: relative;
+                    width: 100%;
+                    aspect-ratio: 3 / 2;
+                    background: radial-gradient(circle at 40% 30%, rgba(255,44,85,0.12), transparent 45%),
+                                radial-gradient(circle at 70% 70%, rgba(85,100,255,0.1), transparent 40%),
+                                #0e0e13;
+                    border: 1px solid #262631;
+                    border-radius: 12px;
+                    overflow: hidden;
+                }
+                .preview-box canvas {
+                    width: 100%;
+                    height: 100%;
+                    display: block;
+                }
+                .preview-placeholder {
+                    position: absolute;
+                    inset: 0;
+                    display: grid;
+                    place-items: center;
+                    color: var(--muted);
+                    font-size: 15px;
+                    letter-spacing: 0.3px;
+                }
+                .preview-meta {
+                    display: flex;
+                    align-items: center;
+                    justify-content: space-between;
+                    gap: 10px;
+                    font-size: 14px;
+                    color: var(--muted);
+                    margin-top: 10px;
+                }
+                .preview-meta strong { color: var(--text); }
+                .preview-note {
+                    color: var(--muted);
+                    font-size: 13px;
+                    margin-top: 12px;
+                    line-height: 1.4;
+                }
                 .section-title {
                     display: flex;
                     align-items: baseline;
@@ -352,15 +397,17 @@ def build_page() -> str:
                             <button class=\"btn btn-primary\" type=\"submit\">Generate PDF</button>
                         </form>
                     </div>
-                    <div class=\"card\" style=\"background: linear-gradient(145deg, rgba(31,31,36,0.7), rgba(27,27,31,0.6)); border: 1px dashed #2c2c35;\">
-                        <h3 style=\"margin-top: 0;\">What you get</h3>
-                        <ul style=\"color: var(--muted); line-height: 1.6; padding-left: 18px;\">
-                            <li>Precise multi-page tiling using your chosen rows and columns.</li>
-                            <li>Automatic scaling to fill the poster area while keeping aspect ratio.</li>
-                            <li>Configurable page size (A4 or Letter), margins, and DPI for crisp prints.</li>
-                            <li>Instant PDF download with one sheet per page.</li>
-                        </ul>
-                        <div style=\"margin-top: 12px; color: var(--muted); font-size: 14px;\">Tip: start with 3x3 or 4x4 to fill a large wall, and tweak margins to your printer's safe area.</div>
+                    <div class=\"card live-preview\">
+                        <h3 style=\"margin-top: 0;\">Live preview</h3>
+                        <p class=\"preview-note\">See exactly how your image will split across pages. The grid updates instantly when you change columns, rows, margins, orientation, or page size.</p>
+                        <div id=\"preview-box\" class=\"preview-box\">
+                            <canvas id=\"preview-canvas\" aria-label=\"Poster grid preview\"></canvas>
+                            <div id=\"preview-placeholder\" class=\"preview-placeholder\">Upload an image to preview the cuts</div>
+                        </div>
+                        <div class=\"preview-meta\">
+                            <span id=\"grid-label\"><strong>Grid</strong>: 3 × 3</span>
+                            <span id=\"page-label\">A4 portrait • 10 mm margin</span>
+                        </div>
                     </div>
                 </div>
             </section>
@@ -451,6 +498,178 @@ def build_page() -> str:
             <footer>
                 Crafted in Python to showcase a Rasterbator-inspired layout. Enjoy turning your photos into striking wall posters.
             </footer>
+            <script>
+                (() => {
+                    const form = document.getElementById("raster-form");
+                    const fileInput = form.querySelector('input[name="image"]');
+                    const columnsInput = form.querySelector('input[name="columns"]');
+                    const rowsInput = form.querySelector('input[name="rows"]');
+                    const marginInput = form.querySelector('input[name="margin"]');
+                    const pageSizeSelect = form.querySelector('select[name="page_size"]');
+                    const orientationSelect = form.querySelector('select[name="orientation"]');
+                    const previewCanvas = document.getElementById("preview-canvas");
+                    const previewBox = document.getElementById("preview-box");
+                    const placeholder = document.getElementById("preview-placeholder");
+                    const gridLabel = document.getElementById("grid-label");
+                    const pageLabel = document.getElementById("page-label");
+
+                    const PAGE_SIZES = {
+                        A4: [210, 297],
+                        Letter: [215.9, 279.4],
+                    };
+
+                    let loadedImage = null;
+
+                    function clampNumber(value, fallback, min = 1) {
+                        const num = Number.parseFloat(value);
+                        if (Number.isNaN(num)) return fallback;
+                        return Math.max(min, num);
+                    }
+
+                    function updateLabels(columns, rows, pageSize, orientation, margin) {
+                        gridLabel.textContent = `Grid: ${columns} × ${rows}`;
+                        pageLabel.textContent = `${pageSize} ${orientation} • ${margin} mm margin`;
+                    }
+
+                    function renderPreview() {
+                        const columns = clampNumber(columnsInput.value, 3);
+                        const rows = clampNumber(rowsInput.value, 3);
+                        const margin = Math.max(0, Number.parseFloat(marginInput.value) || 0);
+                        const pageSize = pageSizeSelect.value in PAGE_SIZES ? pageSizeSelect.value : "A4";
+                        const orientation = orientationSelect.value === "landscape" ? "landscape" : "portrait";
+
+                        updateLabels(columns, rows, pageSize, orientation, margin);
+
+                        const size = PAGE_SIZES[pageSize];
+                        let [pageW, pageH] = size;
+                        if (orientation === "landscape") {
+                            [pageW, pageH] = [pageH, pageW];
+                        }
+
+                        const tileW = pageW - margin * 2;
+                        const tileH = pageH - margin * 2;
+
+                        if (tileW <= 0 || tileH <= 0 || !loadedImage) {
+                            const ctx = previewCanvas.getContext("2d");
+                            const boxRect = previewBox.getBoundingClientRect();
+                            previewCanvas.width = boxRect.width;
+                            previewCanvas.height = boxRect.height;
+                            ctx.clearRect(0, 0, previewCanvas.width, previewCanvas.height);
+                            placeholder.style.display = "grid";
+                            return;
+                        }
+
+                        const totalW = pageW * columns;
+                        const totalH = pageH * rows;
+                        previewBox.style.aspectRatio = `${totalW} / ${totalH}`;
+
+                        const boxRect = previewBox.getBoundingClientRect();
+                        const dpr = window.devicePixelRatio || 1;
+                        previewCanvas.width = boxRect.width * dpr;
+                        previewCanvas.height = boxRect.height * dpr;
+
+                        const ctx = previewCanvas.getContext("2d");
+                        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+                        ctx.clearRect(0, 0, boxRect.width, boxRect.height);
+
+                        placeholder.style.display = "none";
+
+                        const scaleToBox = Math.min(boxRect.width / totalW, boxRect.height / totalH);
+                        const mosaicW = totalW * scaleToBox;
+                        const mosaicH = totalH * scaleToBox;
+                        const offsetX = (boxRect.width - mosaicW) / 2;
+                        const offsetY = (boxRect.height - mosaicH) / 2;
+
+                        ctx.fillStyle = "#0f0f15";
+                        ctx.fillRect(offsetX - 12, offsetY - 12, mosaicW + 24, mosaicH + 24);
+
+                        const scaleToCover = Math.max((tileW * columns) / loadedImage.width, (tileH * rows) / loadedImage.height);
+                        const srcLeft = Math.max(0, (loadedImage.width * scaleToCover - tileW * columns) / 2);
+                        const srcTop = Math.max(0, (loadedImage.height * scaleToCover - tileH * rows) / 2);
+
+                        for (let row = 0; row < rows; row += 1) {
+                            for (let col = 0; col < columns; col += 1) {
+                                const pageX = offsetX + col * pageW * scaleToBox;
+                                const pageY = offsetY + row * pageH * scaleToBox;
+                                const tileX = pageX + margin * scaleToBox;
+                                const tileY = pageY + margin * scaleToBox;
+                                const tileDisplayW = tileW * scaleToBox;
+                                const tileDisplayH = tileH * scaleToBox;
+
+                                ctx.fillStyle = "#181822";
+                                ctx.fillRect(pageX, pageY, pageW * scaleToBox, pageH * scaleToBox);
+
+                                const srcX = (srcLeft + col * tileW) / scaleToCover;
+                                const srcY = (srcTop + row * tileH) / scaleToCover;
+                                const srcW = tileW / scaleToCover;
+                                const srcH = tileH / scaleToCover;
+
+                                ctx.drawImage(
+                                    loadedImage,
+                                    srcX,
+                                    srcY,
+                                    srcW,
+                                    srcH,
+                                    tileX,
+                                    tileY,
+                                    tileDisplayW,
+                                    tileDisplayH,
+                                );
+
+                                ctx.strokeStyle = "rgba(255,255,255,0.22)";
+                                ctx.lineWidth = 1.5;
+                                ctx.setLineDash([6, 6]);
+                                ctx.strokeRect(pageX, pageY, pageW * scaleToBox, pageH * scaleToBox);
+                                ctx.setLineDash([]);
+                            }
+                        }
+
+                        ctx.strokeStyle = "rgba(255, 44, 85, 0.5)";
+                        ctx.lineWidth = 2;
+                        for (let c = 1; c < columns; c += 1) {
+                            const x = offsetX + c * pageW * scaleToBox;
+                            ctx.beginPath();
+                            ctx.moveTo(x, offsetY);
+                            ctx.lineTo(x, offsetY + mosaicH);
+                            ctx.stroke();
+                        }
+                        for (let r = 1; r < rows; r += 1) {
+                            const y = offsetY + r * pageH * scaleToBox;
+                            ctx.beginPath();
+                            ctx.moveTo(offsetX, y);
+                            ctx.lineTo(offsetX + mosaicW, y);
+                            ctx.stroke();
+                        }
+                    }
+
+                    fileInput.addEventListener("change", () => {
+                        const [file] = fileInput.files || [];
+                        if (!file) {
+                            loadedImage = null;
+                            renderPreview();
+                            return;
+                        }
+
+                        const reader = new FileReader();
+                        reader.onload = () => {
+                            const img = new Image();
+                            img.onload = () => {
+                                loadedImage = img;
+                                renderPreview();
+                            };
+                            img.src = reader.result;
+                        };
+                        reader.readAsDataURL(file);
+                    });
+
+                    [columnsInput, rowsInput, marginInput, pageSizeSelect, orientationSelect].forEach((input) => {
+                        input.addEventListener("input", renderPreview);
+                        input.addEventListener("change", renderPreview);
+                    });
+
+                    renderPreview();
+                })();
+            </script>
         </body>
         </html>
         """
