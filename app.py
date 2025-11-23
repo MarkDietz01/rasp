@@ -1,12 +1,44 @@
 from http.server import BaseHTTPRequestHandler, HTTPServer
-import cgi
 from io import BytesIO
 from textwrap import dedent
+from email import policy
+from email.parser import BytesParser
 
 from PIL import Image
 
 HOST = "0.0.0.0"
 PORT = 8000
+
+
+def parse_multipart_form(body: bytes, content_type: str):
+    """Parse a multipart/form-data body into fields and files.
+
+    Returns a tuple of (fields, files) where `fields` maps field names to text
+    values and `files` maps field names to a dict containing filename and
+    content bytes.
+    """
+
+    # Prefix with a synthetic header block so BytesParser can understand the
+    # multipart payload.
+    parser = BytesParser(policy=policy.default)
+    message = parser.parsebytes(f"Content-Type: {content_type}\r\n\r\n".encode() + body)
+
+    fields = {}
+    files = {}
+
+    for part in message.iter_parts():
+        if part.get_content_disposition() != "form-data":
+            continue
+
+        name = part.get_param("name", header="content-disposition")
+        filename = part.get_param("filename", header="content-disposition")
+
+        if filename:
+            files[name] = {"filename": filename, "content": part.get_payload(decode=True)}
+        else:
+            fields[name] = part.get_content()
+
+    return fields, files
 
 
 def build_page() -> str:
@@ -520,33 +552,36 @@ class RasterbatorHandler(BaseHTTPRequestHandler):
             self.send_error(404, "Not Found")
             return
 
-        ctype, _ = cgi.parse_header(self.headers.get("Content-Type", ""))
-        if ctype != "multipart/form-data":
+        content_type = self.headers.get("Content-Type", "")
+        if not content_type.startswith("multipart/form-data"):
             self.send_error(400, "Expected multipart/form-data")
             return
 
-        form = cgi.FieldStorage(
-            fp=self.rfile,
-            headers=self.headers,
-            environ={
-                "REQUEST_METHOD": "POST",
-                "CONTENT_TYPE": self.headers.get("Content-Type", ""),
-            },
-        )
+        content_length = int(self.headers.get("Content-Length", "0"))
+        if content_length <= 0:
+            self.send_error(400, "Missing request body")
+            return
 
-        if "image" not in form or not getattr(form["image"], "file", None):
+        body = self.rfile.read(content_length)
+        try:
+            fields, files = parse_multipart_form(body, content_type)
+        except Exception as exc:  # pylint: disable=broad-except
+            self.send_error(400, f"Failed to parse form data: {exc}")
+            return
+
+        if "image" not in files:
             self.send_error(400, "Image upload is required")
             return
 
         try:
-            columns = int(form.getfirst("columns", "3"))
-            rows = int(form.getfirst("rows", "3"))
-            margin_mm = float(form.getfirst("margin", "10"))
-            dpi = int(form.getfirst("dpi", "300"))
-            page_size = form.getfirst("page_size", "A4")
-            orientation = form.getfirst("orientation", "portrait")
+            columns = int(fields.get("columns", "3"))
+            rows = int(fields.get("rows", "3"))
+            margin_mm = float(fields.get("margin", "10"))
+            dpi = int(fields.get("dpi", "300"))
+            page_size = fields.get("page_size", "A4")
+            orientation = fields.get("orientation", "portrait")
 
-            image_bytes = form["image"].file.read()
+            image_bytes = files["image"]["content"]
             pdf = rasterbate_image(
                 image_bytes=image_bytes,
                 columns=columns,
