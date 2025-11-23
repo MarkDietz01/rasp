@@ -4,7 +4,7 @@ from textwrap import dedent
 from email import policy
 from email.parser import BytesParser
 
-HOST = "0.0.0.0"
+HOST = "localhost"
 PORT = 8000
 
 
