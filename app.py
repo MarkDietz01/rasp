@@ -4,7 +4,7 @@ from textwrap import dedent
 from email import policy
 from email.parser import BytesParser
 
-HOST = "localhost"
+HOST = "0.0.0.0"
 PORT = 8000
 
 
@@ -539,147 +539,146 @@ def build_page() -> str:
                     }
 
                     function renderPreview() {
-                        const columns = clampNumber(columnsInput.value, 3);
-                        const rows = clampNumber(rowsInput.value, 3);
-                        const margin = Math.max(0, Number.parseFloat(marginInput.value) || 0);
-                        const dpi = clampNumber(dpiInput.value, 300, 72);
-                        const pageSize = pageSizeSelect.value in PAGE_SIZES ? pageSizeSelect.value : "A4";
-                        const orientation = orientationSelect.value === "landscape" ? "landscape" : "portrait";
+                        try {
+                            const columns = clampNumber(columnsInput.value, 3);
+                            const rows = clampNumber(rowsInput.value, 3);
+                            const margin = Math.max(0, Number.parseFloat(marginInput.value) || 0);
+                            const dpi = clampNumber(dpiInput.value, 300, 72);
+                            const pageSize = pageSizeSelect.value in PAGE_SIZES ? pageSizeSelect.value : "A4";
+                            const orientation = orientationSelect.value === "landscape" ? "landscape" : "portrait";
 
-                        const size = PAGE_SIZES[pageSize];
-                        let [pageW, pageH] = size;
-                        if (orientation === "landscape") {
-                            [pageW, pageH] = [pageH, pageW];
-                        }
+                            const size = PAGE_SIZES[pageSize];
+                            let [pageW, pageH] = size;
+                            if (orientation === "landscape") {
+                                [pageW, pageH] = [pageH, pageW];
+                            }
 
-                        const tileW = pageW - margin * 2;
-                        const tileH = pageH - margin * 2;
+                            const tileW = pageW - margin * 2;
+                            const tileH = pageH - margin * 2;
 
-                        if (tileW <= 0 || tileH <= 0 || !loadedImage) {
-                            const ctx = previewCanvas.getContext("2d");
                             const boxRect = previewBox.getBoundingClientRect();
-                            if (!boxRect.width || !boxRect.height) {
-                                requestAnimationFrame(renderPreview);
+                            const measuredW = boxRect.width || previewBox.offsetWidth || previewBox.clientWidth || 0;
+                            const measuredH = boxRect.height || previewBox.offsetHeight || previewBox.clientHeight || 0;
+                            const safeW = measuredW || 640;
+                            const safeH = measuredH || 420;
+
+                            if (tileW <= 0 || tileH <= 0 || !loadedImage) {
+                                const ctx = previewCanvas.getContext("2d");
+                                previewCanvas.width = safeW;
+                                previewCanvas.height = safeH;
+                                ctx.clearRect(0, 0, previewCanvas.width, previewCanvas.height);
+                                placeholder.style.display = "grid";
+                                placeholder.textContent = "Upload an image to preview the cuts";
                                 return;
                             }
-                            previewCanvas.width = boxRect.width;
-                            previewCanvas.height = boxRect.height;
-                            ctx.clearRect(0, 0, previewCanvas.width, previewCanvas.height);
-                            placeholder.style.display = "grid";
-                            placeholder.textContent = "Upload an image to preview the cuts";
-                            return;
-                        }
 
-                        const targetWpx = tileW * columns * (dpi / 25.4);
-                        const targetHpx = tileH * rows * (dpi / 25.4);
-                        const cropWpx = Math.min(loadedImage.width, targetWpx);
-                        const cropHpx = Math.min(loadedImage.height, targetHpx);
-                        const footprintCols = cropWpx / (tileW * (dpi / 25.4));
-                        const footprintRows = cropHpx / (tileH * (dpi / 25.4));
-                        updateLabels(columns, rows, pageSize, orientation, margin, dpi, footprintCols, footprintRows);
+                            const mmPerPx = 25.4 / dpi;
+                            const cropWpx = Math.min(loadedImage.width, (tileW * columns) / mmPerPx);
+                            const cropHpx = Math.min(loadedImage.height, (tileH * rows) / mmPerPx);
+                            const footprintCols = (cropWpx * mmPerPx) / tileW;
+                            const footprintRows = (cropHpx * mmPerPx) / tileH;
+                            updateLabels(columns, rows, pageSize, orientation, margin, dpi, footprintCols, footprintRows);
 
-                        const totalW = pageW * columns;
-                        const totalH = pageH * rows;
-                        previewBox.style.aspectRatio = `${totalW} / ${totalH}`;
+                            const totalW = pageW * columns;
+                            const totalH = pageH * rows;
+                            previewBox.style.aspectRatio = `${totalW} / ${totalH}`;
+                            previewBox.style.minHeight = `${Math.max(260, (safeW * totalH) / totalW)}px`;
 
-                        const boxRect = previewBox.getBoundingClientRect();
-                        if (!boxRect.width || !boxRect.height) {
-                            requestAnimationFrame(renderPreview);
-                            return;
-                        }
-                        const dpr = window.devicePixelRatio || 1;
-                        previewCanvas.width = boxRect.width * dpr;
-                        previewCanvas.height = boxRect.height * dpr;
+                            const dpr = window.devicePixelRatio || 1;
+                            previewCanvas.width = safeW * dpr;
+                            previewCanvas.height = safeH * dpr;
 
-                        const ctx = previewCanvas.getContext("2d");
-                        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-                        ctx.clearRect(0, 0, boxRect.width, boxRect.height);
+                            const ctx = previewCanvas.getContext("2d");
+                            ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+                            ctx.clearRect(0, 0, safeW, safeH);
 
-                        placeholder.style.display = "none";
+                            placeholder.style.display = "none";
 
-                        const scaleToBox = Math.min(boxRect.width / totalW, boxRect.height / totalH);
-                        const mosaicW = totalW * scaleToBox;
-                        const mosaicH = totalH * scaleToBox;
-                        const offsetX = (boxRect.width - mosaicW) / 2;
-                        const offsetY = (boxRect.height - mosaicH) / 2;
+                            const scaleToBox = Math.min(safeW / totalW, safeH / totalH);
+                            const mosaicW = totalW * scaleToBox;
+                            const mosaicH = totalH * scaleToBox;
+                            const offsetX = (safeW - mosaicW) / 2;
+                            const offsetY = (safeH - mosaicH) / 2;
 
-                        ctx.fillStyle = "#0f0f15";
-                        ctx.fillRect(offsetX - 12, offsetY - 12, mosaicW + 24, mosaicH + 24);
+                            ctx.fillStyle = "#0f0f15";
+                            ctx.fillRect(offsetX - 12, offsetY - 12, mosaicW + 24, mosaicH + 24);
 
-                        const cropLeftPx = Math.max(0, (loadedImage.width - cropWpx) / 2);
-                        const cropTopPx = Math.max(0, (loadedImage.height - cropHpx) / 2);
-                        const artOffsetWmm = ((tileW * columns) - (cropWpx / (dpi / 25.4))) / 2;
-                        const artOffsetHmm = ((tileH * rows) - (cropHpx / (dpi / 25.4))) / 2;
+                            const cropLeftPx = Math.max(0, (loadedImage.width - cropWpx) / 2);
+                            const cropTopPx = Math.max(0, (loadedImage.height - cropHpx) / 2);
+                            const cropWmm = cropWpx * mmPerPx;
+                            const cropHmm = cropHpx * mmPerPx;
+                            const artOffsetWmm = ((tileW * columns) - cropWmm) / 2;
+                            const artOffsetHmm = ((tileH * rows) - cropHmm) / 2;
 
-                        for (let row = 0; row < rows; row += 1) {
-                            for (let col = 0; col < columns; col += 1) {
-                                const pageX = offsetX + col * pageW * scaleToBox;
-                                const pageY = offsetY + row * pageH * scaleToBox;
-                                const tileX = pageX + margin * scaleToBox;
-                                const tileY = pageY + margin * scaleToBox;
-                                const tileDisplayW = tileW * scaleToBox;
-                                const tileDisplayH = tileH * scaleToBox;
+                            for (let row = 0; row < rows; row += 1) {
+                                for (let col = 0; col < columns; col += 1) {
+                                    const pageX = offsetX + col * pageW * scaleToBox;
+                                    const pageY = offsetY + row * pageH * scaleToBox;
+                                    ctx.fillStyle = "#181822";
+                                    ctx.fillRect(pageX, pageY, pageW * scaleToBox, pageH * scaleToBox);
 
-                                ctx.fillStyle = "#181822";
-                                ctx.fillRect(pageX, pageY, pageW * scaleToBox, pageH * scaleToBox);
+                                    const imageStartXmm = artOffsetWmm + col * tileW;
+                                    const imageStartYmm = artOffsetHmm + row * tileH;
+                                    const imageEndXmm = imageStartXmm + cropWmm;
+                                    const imageEndYmm = imageStartYmm + cropHmm;
 
-                                const imageStartXmm = artOffsetWmm + col * tileW + margin - margin;
-                                const imageStartYmm = artOffsetHmm + row * tileH + margin - margin;
-                                const imageEndXmm = imageStartXmm + (cropWpx / (dpi / 25.4));
-                                const imageEndYmm = imageStartYmm + (cropHpx / (dpi / 25.4));
+                                    const tileStartXmm = col * pageW + margin;
+                                    const tileStartYmm = row * pageH + margin;
+                                    const tileEndXmm = tileStartXmm + tileW;
+                                    const tileEndYmm = tileStartYmm + tileH;
 
-                                const tileStartXmm = col * pageW + margin;
-                                const tileStartYmm = row * pageH + margin;
-                                const tileEndXmm = tileStartXmm + tileW;
-                                const tileEndYmm = tileStartYmm + tileH;
+                                    const drawStartXmm = Math.max(tileStartXmm, imageStartXmm);
+                                    const drawStartYmm = Math.max(tileStartYmm, imageStartYmm);
+                                    const drawEndXmm = Math.min(tileEndXmm, imageEndXmm);
+                                    const drawEndYmm = Math.min(tileEndYmm, imageEndYmm);
 
-                                const drawStartXmm = Math.max(tileStartXmm, imageStartXmm);
-                                const drawStartYmm = Math.max(tileStartYmm, imageStartYmm);
-                                const drawEndXmm = Math.min(tileEndXmm, imageEndXmm);
-                                const drawEndYmm = Math.min(tileEndYmm, imageEndYmm);
+                                    if (drawEndXmm > drawStartXmm && drawEndYmm > drawStartYmm) {
+                                        const srcX = cropLeftPx + ((drawStartXmm - imageStartXmm) / cropWmm) * cropWpx;
+                                        const srcY = cropTopPx + ((drawStartYmm - imageStartYmm) / cropHmm) * cropHpx;
+                                        const srcW = ((drawEndXmm - drawStartXmm) / cropWmm) * cropWpx;
+                                        const srcH = ((drawEndYmm - drawStartYmm) / cropHmm) * cropHpx;
 
-                                if (drawEndXmm > drawStartXmm && drawEndYmm > drawStartYmm) {
-                                    const srcX = cropLeftPx + ((drawStartXmm - imageStartXmm) / (cropWpx / (dpi / 25.4))) * cropWpx;
-                                    const srcY = cropTopPx + ((drawStartYmm - imageStartYmm) / (cropHpx / (dpi / 25.4))) * cropHpx;
-                                    const srcW = ((drawEndXmm - drawStartXmm) / (cropWpx / (dpi / 25.4))) * cropWpx;
-                                    const srcH = ((drawEndYmm - drawStartYmm) / (cropHpx / (dpi / 25.4))) * cropHpx;
+                                        ctx.drawImage(
+                                            loadedImage,
+                                            srcX,
+                                            srcY,
+                                            srcW,
+                                            srcH,
+                                            offsetX + drawStartXmm * scaleToBox,
+                                            offsetY + drawStartYmm * scaleToBox,
+                                            (drawEndXmm - drawStartXmm) * scaleToBox,
+                                            (drawEndYmm - drawStartYmm) * scaleToBox,
+                                        );
+                                    }
 
-                                    ctx.drawImage(
-                                        loadedImage,
-                                        srcX,
-                                        srcY,
-                                        srcW,
-                                        srcH,
-                                        offsetX + (drawStartXmm) * scaleToBox,
-                                        offsetY + (drawStartYmm) * scaleToBox,
-                                        (drawEndXmm - drawStartXmm) * scaleToBox,
-                                        (drawEndYmm - drawStartYmm) * scaleToBox,
-                                    );
+                                    ctx.strokeStyle = "rgba(255,255,255,0.22)";
+                                    ctx.lineWidth = 1.5;
+                                    ctx.setLineDash([6, 6]);
+                                    ctx.strokeRect(pageX, pageY, pageW * scaleToBox, pageH * scaleToBox);
+                                    ctx.setLineDash([]);
                                 }
-
-                                ctx.strokeStyle = "rgba(255,255,255,0.22)";
-                                ctx.lineWidth = 1.5;
-                                ctx.setLineDash([6, 6]);
-                                ctx.strokeRect(pageX, pageY, pageW * scaleToBox, pageH * scaleToBox);
-                                ctx.setLineDash([]);
                             }
-                        }
 
-                        ctx.strokeStyle = "rgba(255, 44, 85, 0.5)";
-                        ctx.lineWidth = 2;
-                        for (let c = 1; c < columns; c += 1) {
-                            const x = offsetX + c * pageW * scaleToBox;
-                            ctx.beginPath();
-                            ctx.moveTo(x, offsetY);
-                            ctx.lineTo(x, offsetY + mosaicH);
-                            ctx.stroke();
-                        }
-                        for (let r = 1; r < rows; r += 1) {
-                            const y = offsetY + r * pageH * scaleToBox;
-                            ctx.beginPath();
-                            ctx.moveTo(offsetX, y);
-                            ctx.lineTo(offsetX + mosaicW, y);
-                            ctx.stroke();
+                            ctx.strokeStyle = "rgba(255, 44, 85, 0.5)";
+                            ctx.lineWidth = 2;
+                            for (let c = 1; c < columns; c += 1) {
+                                const x = offsetX + c * pageW * scaleToBox;
+                                ctx.beginPath();
+                                ctx.moveTo(x, offsetY);
+                                ctx.lineTo(x, offsetY + mosaicH);
+                                ctx.stroke();
+                            }
+                            for (let r = 1; r < rows; r += 1) {
+                                const y = offsetY + r * pageH * scaleToBox;
+                                ctx.beginPath();
+                                ctx.moveTo(offsetX, y);
+                                ctx.lineTo(offsetX + mosaicW, y);
+                                ctx.stroke();
+                            }
+                        } catch (err) {
+                            console.error("Preview failed", err);
+                            placeholder.style.display = "grid";
+                            placeholder.textContent = "Preview failed. Try a smaller image or adjust the inputs.";
                         }
                     }
 
