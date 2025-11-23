@@ -379,9 +379,10 @@ def build_page() -> str:
                                     Margin (mm)
                                     <input type=\"number\" step=\"1\" name=\"margin\" value=\"10\" min=\"0\" max=\"40\" style=\"padding: 10px; border-radius: 10px; border: 1px solid #2c2c35; background: #111118; color: var(--text);\" />
                                 </label>
-                                <label style=\"display: grid; gap: 6px; font-weight: 600;\">
+                                <label style=\"display: grid; gap: 4px; font-weight: 600;\">
                                     DPI
-                                    <input type=\"number\" step=\"50\" name=\"dpi\" value=\"300\" min=\"150\" max=\"600\" style=\"padding: 10px; border-radius: 10px; border: 1px solid #2c2c35; background: #111118; color: var(--text);\" />
+                                    <input type=\"number\" step=\"25\" name=\"dpi\" value=\"300\" min=\"150\" max=\"600\" style=\"padding: 10px; border-radius: 10px; border: 1px solid #2c2c35; background: #111118; color: var(--text);\" />
+                                    <span style=\"color: var(--muted); font-weight: 500; font-size: 12px;\">We auto-detect the sharpest DPI from your upload—adjust only if you want to override.</span>
                                 </label>
                             </div>
                             <label style=\"display: grid; gap: 6px; font-weight: 600;\">
@@ -524,8 +525,12 @@ def build_page() -> str:
                         Letter: [215.9, 279.4],
                     };
 
+                    const DPI_MIN = 72;
+                    const DPI_MAX = 600;
+
                     let loadedImage = null;
                     let activeObjectUrl = null;
+                    let dpiUserOverride = false;
 
                     function clampNumber(value, fallback, min = 1) {
                         const num = Number.parseFloat(value);
@@ -539,11 +544,25 @@ def build_page() -> str:
                         pageLabel.textContent = `${pageSize} ${orientation} • ${margin} mm margin • ${footprint}`;
                     }
 
+                    function suggestDpi(image, columns, rows, pageW, pageH, margin) {
+                        const tileW = pageW - margin * 2;
+                        const tileH = pageH - margin * 2;
+                        if (tileW <= 0 || tileH <= 0) return null;
+
+                        const pxPerMm = Math.max(
+                            image.width / (tileW * columns),
+                            image.height / (tileH * rows),
+                        );
+                        if (!Number.isFinite(pxPerMm) || pxPerMm <= 0) return null;
+
+                        const rawDpi = Math.round(pxPerMm * 25.4);
+                        return Math.min(DPI_MAX, Math.max(DPI_MIN, rawDpi));
+                    }
+
                     function renderPreview() {
                         const columns = clampNumber(columnsInput.value, 3);
                         const rows = clampNumber(rowsInput.value, 3);
                         const margin = Math.max(0, Number.parseFloat(marginInput.value) || 0);
-                        const dpi = clampNumber(dpiInput.value, 300, 72);
                         const pageSize = pageSizeSelect.value in PAGE_SIZES ? pageSizeSelect.value : "A4";
                         const orientation = orientationSelect.value === "landscape" ? "landscape" : "portrait";
 
@@ -571,6 +590,15 @@ def build_page() -> str:
                             placeholder.style.display = "grid";
                             placeholder.textContent = "Upload an image to preview the cuts";
                             return;
+                        }
+
+                        let dpi = clampNumber(dpiInput.value, 300, DPI_MIN);
+                        const autoDpi = suggestDpi(loadedImage, columns, rows, pageW, pageH, margin);
+                        if (autoDpi && !dpiUserOverride) {
+                            dpi = autoDpi;
+                            if (dpiInput.value !== `${autoDpi}`) {
+                                dpiInput.value = `${autoDpi}`;
+                            }
                         }
 
                         const pxPerMm = dpi / 25.4;
@@ -704,6 +732,7 @@ def build_page() -> str:
                         const [file] = fileInput.files || [];
                         if (!file) {
                             loadedImage = null;
+                            dpiUserOverride = false;
                             if (activeObjectUrl) {
                                 URL.revokeObjectURL(activeObjectUrl);
                                 activeObjectUrl = null;
@@ -724,6 +753,7 @@ def build_page() -> str:
                         img.decoding = "async";
                         img.onload = () => {
                             loadedImage = img;
+                            dpiUserOverride = false;
                             renderPreview();
                             placeholder.textContent = "";
                         };
@@ -733,6 +763,10 @@ def build_page() -> str:
                             placeholder.textContent = "Preview failed to load. Try a different image.";
                         };
                         img.src = activeObjectUrl;
+                    });
+
+                    dpiInput.addEventListener("input", () => {
+                        dpiUserOverride = true;
                     });
 
                     [columnsInput, rowsInput, marginInput, dpiInput, pageSizeSelect, orientationSelect].forEach((input) => {
@@ -760,9 +794,34 @@ PAGE_SIZES_MM = {
     "Letter": (215.9, 279.4),
 }
 
+DPI_MIN = 72
+DPI_MAX = 600
+
 
 def mm_to_px(mm: float, dpi: int) -> int:
     return int(round(mm / 25.4 * dpi))
+
+
+def suggest_dpi(
+    image_width_px: int,
+    image_height_px: int,
+    columns: int,
+    rows: int,
+    page_width_mm: float,
+    page_height_mm: float,
+    margin_mm: float,
+) -> int:
+    tile_w_mm = page_width_mm - margin_mm * 2
+    tile_h_mm = page_height_mm - margin_mm * 2
+    if tile_w_mm <= 0 or tile_h_mm <= 0:
+        return 300
+
+    px_per_mm = max(image_width_px / (tile_w_mm * columns), image_height_px / (tile_h_mm * rows))
+    if px_per_mm <= 0:
+        return 300
+
+    raw_dpi = int(round(px_per_mm * 25.4))
+    return max(DPI_MIN, min(DPI_MAX, raw_dpi))
 
 
 def rasterbate_image(
@@ -785,9 +844,6 @@ def rasterbate_image(
         raise ValueError("Columns and rows must be positive integers.")
     if margin_mm < 0:
         raise ValueError("Margin cannot be negative.")
-    if dpi < 72:
-        raise ValueError("DPI must be at least 72.")
-
     if page_size not in PAGE_SIZES_MM:
         raise ValueError("Unsupported page size.")
 
@@ -795,9 +851,15 @@ def rasterbate_image(
     if orientation not in {"portrait", "landscape"}:
         raise ValueError("Orientation must be portrait or landscape.")
 
+    image = Image.open(BytesIO(image_bytes)).convert("RGB")
+
     width_mm, height_mm = PAGE_SIZES_MM[page_size]
     if orientation == "landscape":
         width_mm, height_mm = height_mm, width_mm
+
+    if dpi < DPI_MIN:
+        dpi = suggest_dpi(image.width, image.height, columns, rows, width_mm, height_mm, margin_mm)
+    dpi = max(DPI_MIN, min(DPI_MAX, dpi))
 
     page_w_px = mm_to_px(width_mm, dpi)
     page_h_px = mm_to_px(height_mm, dpi)
@@ -883,11 +945,17 @@ class RasterbatorHandler(BaseHTTPRequestHandler):
             self.send_error(400, "Image upload is required")
             return
 
+        def parse_int(value: str | None, fallback: int) -> int:
+            try:
+                return int(value) if value is not None else fallback
+            except ValueError:
+                return fallback
+
         try:
             columns = int(fields.get("columns", "3"))
             rows = int(fields.get("rows", "3"))
             margin_mm = float(fields.get("margin", "10"))
-            dpi = int(fields.get("dpi", "300"))
+            dpi = parse_int(fields.get("dpi"), -1)
             page_size = fields.get("page_size", "A4")
             orientation = fields.get("orientation", "portrait")
 
