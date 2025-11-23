@@ -1,0 +1,587 @@
+from http.server import BaseHTTPRequestHandler, HTTPServer
+import cgi
+from io import BytesIO
+from textwrap import dedent
+
+from PIL import Image
+
+HOST = "0.0.0.0"
+PORT = 8000
+
+
+def build_page() -> str:
+    """Return the HTML content for the Rasterbator-style landing page."""
+    return dedent(
+        """
+        <!DOCTYPE html>
+        <html lang=\"en\">
+        <head>
+            <meta charset=\"UTF-8\" />
+            <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\" />
+            <title>Rasterbator Reimagined</title>
+            <style>
+                :root {
+                    color-scheme: light dark;
+                    --accent: #ff2c55;
+                    --bg: #0d0d0f;
+                    --panel: #151519;
+                    --text: #e9e9ed;
+                    --muted: #b6b7be;
+                    --card: #1f1f24;
+                }
+                * { box-sizing: border-box; }
+                body {
+                    margin: 0;
+                    font-family: \"Inter\", system-ui, -apple-system, sans-serif;
+                    background: radial-gradient(circle at 20% 20%, rgba(255,44,85,0.18), transparent 30%),
+                                radial-gradient(circle at 80% 0%, rgba(85,100,255,0.14), transparent 25%),
+                                var(--bg);
+                    color: var(--text);
+                }
+                header {
+                    position: sticky;
+                    top: 0;
+                    backdrop-filter: blur(12px);
+                    background: rgba(13,13,15,0.75);
+                    border-bottom: 1px solid #262631;
+                    z-index: 10;
+                }
+                .nav {
+                    display: flex;
+                    align-items: center;
+                    justify-content: space-between;
+                    max-width: 1100px;
+                    margin: 0 auto;
+                    padding: 14px 20px;
+                }
+                .brand {
+                    display: flex;
+                    align-items: center;
+                    gap: 10px;
+                    font-weight: 700;
+                    letter-spacing: 0.4px;
+                }
+                .brand span {
+                    color: var(--accent);
+                }
+                .nav-links {
+                    display: flex;
+                    gap: 18px;
+                    color: var(--muted);
+                    font-size: 14px;
+                }
+                .nav-links a { color: inherit; text-decoration: none; }
+                .hero {
+                    max-width: 1100px;
+                    margin: 60px auto;
+                    display: grid;
+                    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+                    gap: 32px;
+                    padding: 0 20px;
+                    align-items: center;
+                }
+                .hero-card {
+                    background: linear-gradient(145deg, rgba(31,31,36,0.8), rgba(27,27,31,0.7));
+                    border: 1px solid #242632;
+                    border-radius: 18px;
+                    padding: 28px;
+                    box-shadow: 0 20px 60px rgba(0,0,0,0.45);
+                }
+                .hero h1 {
+                    font-size: clamp(34px, 5vw, 52px);
+                    margin: 0 0 16px;
+                }
+                .hero p {
+                    color: var(--muted);
+                    font-size: 16px;
+                    line-height: 1.6;
+                }
+                .cta-buttons {
+                    display: flex;
+                    gap: 12px;
+                    margin-top: 18px;
+                    flex-wrap: wrap;
+                }
+                .btn {
+                    padding: 12px 18px;
+                    border-radius: 10px;
+                    border: 1px solid transparent;
+                    cursor: pointer;
+                    font-weight: 700;
+                    text-decoration: none;
+                    transition: transform 120ms ease, box-shadow 120ms ease;
+                }
+                .btn:hover { transform: translateY(-1px); }
+                .btn-primary {
+                    background: var(--accent);
+                    color: #fff;
+                    box-shadow: 0 10px 30px rgba(255,44,85,0.35);
+                }
+                .btn-secondary {
+                    background: #1f1f24;
+                    color: var(--text);
+                    border-color: #2c2c35;
+                }
+                .hero-visual {
+                    background: radial-gradient(circle at 30% 20%, rgba(255,44,85,0.2), transparent 45%),
+                                radial-gradient(circle at 80% 0%, rgba(85,100,255,0.2), transparent 35%),
+                                var(--card);
+                    border: 1px solid #272733;
+                    border-radius: 16px;
+                    padding: 24px;
+                    position: relative;
+                    overflow: hidden;
+                    min-height: 320px;
+                }
+                .hero-visual .grid {
+                    display: grid;
+                    grid-template-columns: repeat(6, 1fr);
+                    gap: 6px;
+                }
+                .hero-visual .cell {
+                    padding-top: 100%;
+                    border-radius: 6px;
+                    position: relative;
+                    overflow: hidden;
+                    background: linear-gradient(135deg, rgba(255,44,85,0.7), rgba(85,100,255,0.7));
+                }
+                .hero-visual .cell::after {
+                    content: \"\";
+                    position: absolute;
+                    inset: 0;
+                    background: radial-gradient(circle at 30% 30%, rgba(255,255,255,0.6), transparent 45%);
+                }
+                .hero-visual .badge {
+                    position: absolute;
+                    bottom: 16px;
+                    right: 16px;
+                    background: rgba(12,12,15,0.8);
+                    border: 1px solid #31313d;
+                    padding: 10px 14px;
+                    border-radius: 10px;
+                    font-size: 14px;
+                    color: var(--muted);
+                }
+                section {
+                    max-width: 1100px;
+                    margin: 0 auto 60px;
+                    padding: 0 20px;
+                }
+                .section-title {
+                    display: flex;
+                    align-items: baseline;
+                    gap: 10px;
+                    margin-bottom: 22px;
+                }
+                .section-title span { color: var(--accent); font-weight: 700; }
+                .feature-grid {
+                    display: grid;
+                    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+                    gap: 18px;
+                }
+                .card {
+                    background: var(--card);
+                    border: 1px solid #242632;
+                    border-radius: 14px;
+                    padding: 18px;
+                    box-shadow: 0 8px 30px rgba(0,0,0,0.35);
+                }
+                .card h3 { margin-top: 0; margin-bottom: 10px; }
+                .card p { color: var(--muted); line-height: 1.5; }
+                .steps {
+                    display: grid;
+                    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+                    gap: 16px;
+                }
+                .step-number {
+                    display: inline-flex;
+                    align-items: center;
+                    justify-content: center;
+                    width: 32px;
+                    height: 32px;
+                    border-radius: 10px;
+                    background: rgba(255,44,85,0.12);
+                    color: var(--accent);
+                    font-weight: 800;
+                    margin-bottom: 10px;
+                }
+                .faq {
+                    display: grid;
+                    gap: 12px;
+                    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+                }
+                .faq-item {
+                    background: #17171c;
+                    border: 1px solid #242632;
+                    border-radius: 12px;
+                    padding: 16px;
+                }
+                footer {
+                    padding: 24px 20px 60px;
+                    text-align: center;
+                    color: var(--muted);
+                }
+                @media (max-width: 640px) {
+                    .nav-links { display: none; }
+                    .hero { margin-top: 30px; }
+                }
+            </style>
+        </head>
+        <body>
+            <header>
+                <div class=\"nav\">
+                    <div class=\"brand\">
+                        <svg width=\"28\" height=\"28\" viewBox=\"0 0 24 24\" fill=\"none\" xmlns=\"http://www.w3.org/2000/svg\">
+                            <circle cx=\"12\" cy=\"12\" r=\"10\" stroke=\"var(--accent)\" stroke-width=\"2\" />
+                            <path d=\"M12 4V12L17 15\" stroke=\"var(--accent)\" stroke-width=\"2\" stroke-linecap=\"round\" />
+                        </svg>
+                        <span>Rasterbator</span> Reimagined
+                    </div>
+                    <div class=\"nav-links\">
+                        <a href=\"#how\">How it works</a>
+                        <a href=\"#features\">Features</a>
+                        <a href=\"#faq\">FAQ</a>
+                    </div>
+                </div>
+            </header>
+
+            <div class=\"hero\">
+                <div class=\"hero-card\">
+                    <div class=\"pill\" style=\"color: var(--muted); letter-spacing: 1px; font-weight: 700; font-size: 13px;\">CREATE. PRINT. AMAZE.</div>
+                    <h1>Turn any image into massive wall art.</h1>
+                    <p>Upload an image, choose your paper size and margins, and generate a ready-to-print PDF that transforms your photo into multi-page poster mosaics.</p>
+                    <div class=\"cta-buttons\">
+                        <a class=\"btn btn-primary\" href=\"#rasterbate\">Rasterbate an image</a>
+                        <a class=\"btn btn-secondary\" href=\"#features\">See how it works</a>
+                    </div>
+                    <p style=\"margin-top: 16px; color: var(--muted);\">100% free • No install required • Works in your browser</p>
+                </div>
+                <div class=\"hero-visual\" aria-hidden=\"true\">
+                    <div class=\"grid\">
+                        <div class=\"cell\"></div>
+                        <div class=\"cell\"></div>
+                        <div class=\"cell\"></div>
+                        <div class=\"cell\"></div>
+                        <div class=\"cell\"></div>
+                        <div class=\"cell\"></div>
+                        <div class=\"cell\"></div>
+                        <div class=\"cell\"></div>
+                        <div class=\"cell\"></div>
+                        <div class=\"cell\"></div>
+                        <div class=\"cell\"></div>
+                        <div class=\"cell\"></div>
+                    </div>
+                    <div class=\"badge\">Poster size: 5x4 A4 sheets</div>
+                </div>
+            </div>
+
+            <section id=\"rasterbate\" style=\"margin-top: 20px;\">
+                <div class=\"section-title\"><span>Try it now</span><h2>Create a multi-page PDF from your image</h2></div>
+                <div class=\"card\" style=\"display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 24px; align-items: start;\">
+                    <div>
+                        <form id=\"raster-form\" action=\"/rasterbate\" method=\"post\" enctype=\"multipart/form-data\" target=\"_blank\" style=\"display: grid; gap: 12px;\">
+                            <label style=\"display: grid; gap: 6px; font-weight: 600;\">
+                                Select image (PNG/JPG)
+                                <input required type=\"file\" name=\"image\" accept=\"image/png, image/jpeg\" style=\"padding: 10px; border-radius: 10px; border: 1px solid #2c2c35; background: #111118;\" />
+                            </label>
+                            <div style=\"display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));\">
+                                <label style=\"display: grid; gap: 6px; font-weight: 600;\">
+                                    Columns
+                                    <input required type=\"number\" name=\"columns\" value=\"3\" min=\"1\" max=\"10\" style=\"padding: 10px; border-radius: 10px; border: 1px solid #2c2c35; background: #111118; color: var(--text);\" />
+                                </label>
+                                <label style=\"display: grid; gap: 6px; font-weight: 600;\">
+                                    Rows
+                                    <input required type=\"number\" name=\"rows\" value=\"3\" min=\"1\" max=\"10\" style=\"padding: 10px; border-radius: 10px; border: 1px solid #2c2c35; background: #111118; color: var(--text);\" />
+                                </label>
+                                <label style=\"display: grid; gap: 6px; font-weight: 600;\">
+                                    Margin (mm)
+                                    <input type=\"number\" step=\"1\" name=\"margin\" value=\"10\" min=\"0\" max=\"40\" style=\"padding: 10px; border-radius: 10px; border: 1px solid #2c2c35; background: #111118; color: var(--text);\" />
+                                </label>
+                                <label style=\"display: grid; gap: 6px; font-weight: 600;\">
+                                    DPI
+                                    <input type=\"number\" step=\"50\" name=\"dpi\" value=\"300\" min=\"150\" max=\"600\" style=\"padding: 10px; border-radius: 10px; border: 1px solid #2c2c35; background: #111118; color: var(--text);\" />
+                                </label>
+                            </div>
+                            <label style=\"display: grid; gap: 6px; font-weight: 600;\">
+                                Page size
+                                <select name=\"page_size\" style=\"padding: 10px; border-radius: 10px; border: 1px solid #2c2c35; background: #111118; color: var(--text);\">
+                                    <option value=\"A4\" selected>A4 (210 x 297 mm)</option>
+                                    <option value=\"Letter\">Letter (8.5 x 11 in)</option>
+                                </select>
+                            </label>
+                            <label style=\"display: grid; gap: 6px; font-weight: 600;\">
+                                Orientation
+                                <select name=\"orientation\" style=\"padding: 10px; border-radius: 10px; border: 1px solid #2c2c35; background: #111118; color: var(--text);\">
+                                    <option value=\"portrait\" selected>Portrait</option>
+                                    <option value=\"landscape\">Landscape</option>
+                                </select>
+                            </label>
+                            <p style=\"color: var(--muted); font-size: 14px; margin: 0;\">Submit to download a ready-to-print PDF. Each sheet will be a separate page in the PDF.</p>
+                            <button class=\"btn btn-primary\" type=\"submit\">Generate PDF</button>
+                        </form>
+                    </div>
+                    <div class=\"card\" style=\"background: linear-gradient(145deg, rgba(31,31,36,0.7), rgba(27,27,31,0.6)); border: 1px dashed #2c2c35;\">
+                        <h3 style=\"margin-top: 0;\">What you get</h3>
+                        <ul style=\"color: var(--muted); line-height: 1.6; padding-left: 18px;\">
+                            <li>Precise multi-page tiling using your chosen rows and columns.</li>
+                            <li>Automatic scaling to fill the poster area while keeping aspect ratio.</li>
+                            <li>Configurable page size (A4 or Letter), margins, and DPI for crisp prints.</li>
+                            <li>Instant PDF download with one sheet per page.</li>
+                        </ul>
+                        <div style=\"margin-top: 12px; color: var(--muted); font-size: 14px;\">Tip: start with 3x3 or 4x4 to fill a large wall, and tweak margins to your printer's safe area.</div>
+                    </div>
+                </div>
+            </section>
+
+            <section id=\"how\">
+                <div class=\"section-title\"><span>How it works</span><h2>From image to poster in minutes</h2></div>
+                <div class=\"steps\">
+                    <div class=\"card\">
+                        <div class=\"step-number\">1</div>
+                        <h3>Upload your image</h3>
+                        <p>Select a PNG, JPG, or GIF—high-resolution photos give the best results.</p>
+                    </div>
+                    <div class=\"card\">
+                        <div class=\"step-number\">2</div>
+                        <h3>Choose layout</h3>
+                        <p>Pick portrait or landscape, set paper size, and adjust margins to match your printer.</p>
+                    </div>
+                    <div class=\"card\">
+                        <div class=\"step-number\">3</div>
+                        <h3>Generate PDF</h3>
+                        <p>Download a tiled PDF that splits the image into perfectly aligned pages.</p>
+                    </div>
+                </div>
+            </section>
+
+            <section id=\"features\">
+                <div class=\"section-title\"><span>Features</span><h2>Precise controls for perfect posters</h2></div>
+                <div class=\"feature-grid\">
+                    <div class=\"card\">
+                        <h3>Smart resizing</h3>
+                        <p>Scale your image to any wall size while keeping crisp detail and balanced margins.</p>
+                    </div>
+                    <div class=\"card\">
+                        <h3>Pixel, line, or dot styles</h3>
+                        <p>Experiment with classic halftone dots, grid-based pixels, or minimalist line art.</p>
+                    </div>
+                    <div class=\"card\">
+                        <h3>Color or monochrome</h3>
+                        <p>Switch between vibrant color output and high-contrast black-and-white looks.</p>
+                    </div>
+                    <div class=\"card\">
+                        <h3>Instant previews</h3>
+                        <p>Review your poster layout before you print so you know exactly what you'll get.</p>
+                    </div>
+                </div>
+            </section>
+
+            <section>
+                <div class=\"section-title\"><span>Why people love it</span><h2>Make a statement on any wall</h2></div>
+                <div class=\"feature-grid\">
+                    <div class=\"card\">
+                        <h3>Budget friendly</h3>
+                        <p>Create oversized art with regular home printers and everyday paper.</p>
+                    </div>
+                    <div class=\"card\">
+                        <h3>Anyone can do it</h3>
+                        <p>No design degree needed—just pick an image and follow the prompts.</p>
+                    </div>
+                    <div class=\"card\">
+                        <h3>Perfect alignment</h3>
+                        <p>Built-in margins and print guides make taping panels together painless.</p>
+                    </div>
+                </div>
+            </section>
+
+            <section id=\"faq\">
+                <div class=\"section-title\"><span>FAQ</span><h2>Common questions</h2></div>
+                <div class=\"faq\">
+                    <div class=\"faq-item\">
+                        <h3>Do I need to install anything?</h3>
+                        <p>No, the experience is entirely browser-based. Generate your PDF online and print locally.</p>
+                    </div>
+                    <div class=\"faq-item\">
+                        <h3>What paper sizes are supported?</h3>
+                        <p>Works great with A4, A3, Letter, Legal, and Tabloid. Custom sizes are supported, too.</p>
+                    </div>
+                    <div class=\"faq-item\">
+                        <h3>Does it handle very large images?</h3>
+                        <p>High-resolution images are recommended. The generator automatically scales to fit the chosen layout.</p>
+                    </div>
+                    <div class=\"faq-item\">
+                        <h3>Is there a watermark?</h3>
+                        <p>No watermarks are added. Your finished PDF is clean and ready to print or share.</p>
+                    </div>
+                </div>
+            </section>
+
+            <footer>
+                Crafted in Python to showcase a Rasterbator-inspired layout. Enjoy turning your photos into striking wall posters.
+            </footer>
+        </body>
+        </html>
+        """
+    )
+
+
+PAGE_SIZES_MM = {
+    "A4": (210.0, 297.0),
+    "Letter": (215.9, 279.4),
+}
+
+
+def mm_to_px(mm: float, dpi: int) -> int:
+    return int(round(mm / 25.4 * dpi))
+
+
+def rasterbate_image(
+    image_bytes: bytes,
+    columns: int,
+    rows: int,
+    page_size: str,
+    orientation: str,
+    margin_mm: float,
+    dpi: int,
+) -> BytesIO:
+    if columns < 1 or rows < 1:
+        raise ValueError("Columns and rows must be positive integers.")
+    if margin_mm < 0:
+        raise ValueError("Margin cannot be negative.")
+    if dpi < 72:
+        raise ValueError("DPI must be at least 72.")
+
+    if page_size not in PAGE_SIZES_MM:
+        raise ValueError("Unsupported page size.")
+
+    orientation = orientation.lower()
+    if orientation not in {"portrait", "landscape"}:
+        raise ValueError("Orientation must be portrait or landscape.")
+
+    width_mm, height_mm = PAGE_SIZES_MM[page_size]
+    if orientation == "landscape":
+        width_mm, height_mm = height_mm, width_mm
+
+    page_w_px = mm_to_px(width_mm, dpi)
+    page_h_px = mm_to_px(height_mm, dpi)
+    margin_px = mm_to_px(margin_mm, dpi)
+
+    if margin_px * 2 >= page_w_px or margin_px * 2 >= page_h_px:
+        raise ValueError("Margin too large for the selected page size.")
+
+    tile_w = page_w_px - 2 * margin_px
+    tile_h = page_h_px - 2 * margin_px
+
+    target_w = tile_w * columns
+    target_h = tile_h * rows
+
+    image = Image.open(BytesIO(image_bytes)).convert("RGB")
+
+    # Scale the image to cover the target area, then center-crop
+    scale = max(target_w / image.width, target_h / image.height)
+    new_size = (int(image.width * scale), int(image.height * scale))
+    resized = image.resize(new_size, Image.LANCZOS)
+
+    left = max(0, (resized.width - target_w) // 2)
+    top = max(0, (resized.height - target_h) // 2)
+    cover = resized.crop((left, top, left + target_w, top + target_h))
+
+    pages = []
+    for row in range(rows):
+        for col in range(columns):
+            crop_box = (
+                col * tile_w,
+                row * tile_h,
+                (col + 1) * tile_w,
+                (row + 1) * tile_h,
+            )
+            tile = cover.crop(crop_box)
+            page = Image.new("RGB", (page_w_px, page_h_px), "white")
+            page.paste(tile, (margin_px, margin_px))
+            pages.append(page)
+
+    output = BytesIO()
+    pages[0].save(output, format="PDF", save_all=True, append_images=pages[1:], resolution=dpi)
+    output.seek(0)
+    return output
+
+
+class RasterbatorHandler(BaseHTTPRequestHandler):
+    def do_GET(self) -> None:  # noqa: N802 - name required by BaseHTTPRequestHandler
+        page = build_page().encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(page)))
+        self.end_headers()
+        self.wfile.write(page)
+
+    def do_POST(self) -> None:  # noqa: N802 - name required by BaseHTTPRequestHandler
+        if self.path != "/rasterbate":
+            self.send_error(404, "Not Found")
+            return
+
+        ctype, _ = cgi.parse_header(self.headers.get("Content-Type", ""))
+        if ctype != "multipart/form-data":
+            self.send_error(400, "Expected multipart/form-data")
+            return
+
+        form = cgi.FieldStorage(
+            fp=self.rfile,
+            headers=self.headers,
+            environ={
+                "REQUEST_METHOD": "POST",
+                "CONTENT_TYPE": self.headers.get("Content-Type", ""),
+            },
+        )
+
+        if "image" not in form or not getattr(form["image"], "file", None):
+            self.send_error(400, "Image upload is required")
+            return
+
+        try:
+            columns = int(form.getfirst("columns", "3"))
+            rows = int(form.getfirst("rows", "3"))
+            margin_mm = float(form.getfirst("margin", "10"))
+            dpi = int(form.getfirst("dpi", "300"))
+            page_size = form.getfirst("page_size", "A4")
+            orientation = form.getfirst("orientation", "portrait")
+
+            image_bytes = form["image"].file.read()
+            pdf = rasterbate_image(
+                image_bytes=image_bytes,
+                columns=columns,
+                rows=rows,
+                page_size=page_size,
+                orientation=orientation,
+                margin_mm=margin_mm,
+                dpi=dpi,
+            )
+        except Exception as exc:  # pylint: disable=broad-except
+            self.send_error(400, f"Failed to rasterbate image: {exc}")
+            return
+
+        pdf_bytes = pdf.getvalue()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/pdf")
+        self.send_header("Content-Length", str(len(pdf_bytes)))
+        self.send_header("Content-Disposition", "attachment; filename=poster.pdf")
+        self.end_headers()
+        self.wfile.write(pdf_bytes)
+
+    def log_message(self, format: str, *args) -> None:  # noqa: A003 - inherits name from base class
+        return  # Silence default console logging for cleaner output
+
+
+def main() -> None:
+    server = HTTPServer((HOST, PORT), RasterbatorHandler)
+    print(f"Rasterbator-style site running at http://{HOST}:{PORT}")
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        print("\nShutting down server...")
+    finally:
+        server.server_close()
+
+
+if __name__ == "__main__":
+    main()
